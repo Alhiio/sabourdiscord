@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conecta — chamadas privadas</title>
+<style>
+:root{--bg:#080b14;--panel:#111725;--line:#242d42;--txt:#f5f7ff;--muted:#9ba7c0;--accent:#6573ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#202b55 0,#080b14 45%);color:var(--txt);font-family:Inter,system-ui,sans-serif;min-height:100vh}
+header{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:#080b14cc;backdrop-filter:blur(12px)}
+.logo{font-size:23px;font-weight:900}.logo span{color:#7c88ff}.status{color:var(--muted);font-size:13px}
+main{max-width:1200px;margin:auto;padding:28px 20px}.hero{text-align:center;padding:45px 10px 30px}.hero h1{font-size:clamp(32px,5vw,58px);margin:0 0 12px}.hero p{color:var(--muted);max-width:650px;margin:auto;line-height:1.6}
+.card{background:#111725e8;border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 18px 50px #0004}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:25px}input{background:#0b101c;border:1px solid #303a53;color:white;border-radius:12px;padding:13px 15px;min-width:270px}button{border:0;border-radius:12px;padding:13px 17px;font-weight:800;cursor:pointer;background:var(--accent);color:#fff}button.alt{background:#202941}button.red{background:#c9435b}
+#room{display:none}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.invite{display:flex;gap:8px}.invite input{min-width:300px}
+.videos{display:grid;grid-template-columns:1fr 1fr;gap:14px}.video{height:min(58vh,520px);background:#05070c;border-radius:17px;overflow:hidden;position:relative;border:1px solid var(--line)}video{width:100%;height:100%;object-fit:contain}.tag{position:absolute;left:12px;top:12px;background:#0009;border-radius:8px;padding:7px 10px;font-size:12px;z-index:2}
+.controls{display:flex;justify-content:center;gap:9px;flex-wrap:wrap;margin-top:15px}.controls button{min-width:130px}.chat{margin-top:15px}.chatbox{height:180px;overflow:auto;background:#0a0f1b;border:1px solid var(--line);border-radius:13px;padding:12px}.msg{margin:7px 0;color:#dce2f5}.msg b{color:#8491ff}.send{display:flex;gap:8px;margin-top:8px}.send input{flex:1}
+.notice{text-align:center;color:var(--muted);font-size:14px;margin-top:14px}
+@media(max-width:800px){.videos{grid-template-columns:1fr}.video{height:38vh}.invite{width:100%}.invite input{min-width:0;flex:1}.hero{padding-top:25px}}
+</style></head>
+<body>
+<header><div class="logo">Conecta<span>.</span></div><div class="status" id="status">Pronto</div></header>
+<main>
+<section id="home">
+<div class="hero"><h1>Converse. Compartilhe. Conecte.</h1><p>Uma sala privada para duas pessoas com câmera, microfone, tela e chat em tempo real.</p></div>
+<div class="card"><div class="row"><input id="name" maxlength="30" placeholder="Seu nome ou apelido"><button id="create">Criar sala</button></div><div class="notice">Nenhuma conta é necessária.</div></div>
+</section>
+
+<section id="room">
+<div class="card">
+<div class="top"><div><b id="roomTitle">Sala privada</b><div class="notice" id="people">Aguardando alguém...</div></div>
+<div class="invite"><input id="link" readonly><button id="copy">Copiar</button></div></div>
+<div class="videos"><div class="video"><div class="tag" id="meTag">Você</div><video id="local" autoplay muted playsinline></video></div>
+<div class="video"><div class="tag" id="peerTag">Aguardando...</div><video id="remote" autoplay playsinline></video></div></div>
+<div class="controls">
+<button id="cam">📹 Câmera</button><button id="mic">🎤 Microfone</button><button id="screen">🖥️ Compartilhar tela</button><button class="red" id="leave">☎ Encerrar</button>
+</div>
+<div class="chat"><div class="chatbox" id="messages"></div><div class="send"><input id="chatInput" placeholder="Digite uma mensagem..."><button id="send">Enviar</button></div></div>
+</div>
+<div class="notice">Sua câmera, microfone e tela só são compartilhados depois que você autoriza o navegador.</div>
+</section>
+</main>
+<script>
+const $=x=>document.getElementById(x), q=new URLSearchParams(location.search);
+let room=q.get("room"),name=localStorage.getItem("conectaName")||"",ws,pc,stream=new MediaStream(),screenTrack=null;
+let camOn=false,micOn=false,initiator=false;
+const rtc={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
+function note(t){$("status").textContent=t}
+function send(m){if(ws?.readyState===1)ws.send(JSON.stringify(m))}
+async function pcInit(){if(pc)return;pc=new RTCPeerConnection(rtc);
+ pc.onicecandidate=e=>e.candidate&&send({type:"ice",candidate:e.candidate});
+ pc.ontrack=e=>{if(!$("remote").srcObject)$("remote").srcObject=new MediaStream();$("remote").srcObject.addTrack(e.track)};
+ pc.onconnectionstatechange=()=>note("Conexão: "+pc.connectionState);
+}
+async function addTracks(){await pcInit();for(const t of stream.getTracks())if(!pc.getSenders().some(s=>s.track===t))pc.addTrack(t,stream)}
+async function offer(){await addTracks();let o=await pc.createOffer();await pc.setLocalDescription(o);send({type:"offer",offer:o})}
+async function join(id){
+ room=id;$("home").style.display="none";$("room").style.display="block";
+ $("link").value=location.origin+location.pathname+"?room="+id;
+ history.replaceState({}, "", "?room="+id);
+ ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
+ ws.onopen=()=>{send({type:"join",room,name});note("Sala conectada")};
+ ws.onmessage=async e=>{let m=JSON.parse(e.data);
+  if(m.type==="full"){alert("Esta sala já está cheia.");return}
+  if(m.type==="joined"){initiator=m.count===1;$("people").textContent=m.count===1?"Aguardando alguém...":"2 pessoas";return}
+  if(m.type==="peer"){$("peerTag").textContent=m.name;$("people").textContent="2 pessoas";if(initiator)await offer()}
+  if(m.type==="offer"){await pcInit();await pc.setRemoteDescription(m.offer);await addTracks();let a=await pc.createAnswer();await pc.setLocalDescription(a);send({type:"answer",answer:a})}
+  if(m.type==="answer")await pc.setRemoteDescription(m.answer);
+  if(m.type==="ice")try{await pc.addIceCandidate(m.candidate)}catch{}
+  if(m.type==="left"){$("peerTag").textContent="Aguardando...";$("people").textContent="Aguardando alguém...";$("remote").srcObject=null}
+  if(m.type==="chat")addMsg(m.name,m.text);
+ };
+}
+async function media(){
+ try{let s=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  s.getTracks().forEach(t=>stream.addTrack(t));$("local").srcObject=stream;camOn=micOn=true;update();await offer()
+ }catch{alert("Não foi possível acessar câmera/microfone. Verifique as permissões do navegador.")}
+}
+function update(){$("cam").textContent=camOn?"📹 Câmera ligada":"📹 Câmera desligada";$("mic").textContent=micOn?"🎤 Microfone ligado":"🎤 Microfone desligado"}
+$("create").onclick=async()=>{name=$("name").value.trim()||"Visitante";localStorage.setItem("conectaName",name);let r=await fetch("/api/room");let d=await r.json();await join(d.roomId);await media()};
+$("copy").onclick=()=>navigator.clipboard.writeText($("link").value);
+$("cam").onclick=async()=>{if(!stream.getVideoTracks().length){await media();return}camOn=!camOn;stream.getVideoTracks().forEach(t=>t.enabled=camOn);update()};
+$("mic").onclick=async()=>{if(!stream.getAudioTracks().length){await media();return}micOn=!micOn;stream.getAudioTracks().forEach(t=>t.enabled=micOn);update()};
+$("screen").onclick=async()=>{try{let s=await navigator.mediaDevices.getDisplayMedia({video:true});screenTrack=s.getVideoTracks()[0];await pcInit();let sender=pc.getSenders().find(x=>x.track?.kind==="video");if(sender)await sender.replaceTrack(screenTrack);else{stream.addTrack(screenTrack);await addTracks()}$("local").srcObject=stream;screenTrack.onended=()=>{let cam=stream.getVideoTracks().find(t=>t!==screenTrack);if(cam){let sender=pc.getSenders().find(x=>x.track?.kind==="video");sender?.replaceTrack(cam)}note("Tela encerrada")};note("Tela compartilhada")}catch{}};
+function addMsg(n,t){let d=document.createElement("div");d.className="msg";d.innerHTML="<b>"+esc(n)+":</b> "+esc(t);$("messages").appendChild(d);$("messages").scrollTop=99999}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function chat(){let t=$("chatInput").value.trim();if(!t)return;addMsg(name,t);send({type:"chat",text:t});$("chatInput").value=""}
+$("send").onclick=chat;$("chatInput").onkeydown=e=>e.key==="Enter"&&chat();
+$("leave").onclick=()=>{stream.getTracks().forEach(t=>t.stop());pc?.close();ws?.close();location.href=location.pathname};
+if(room){name=name||"Visitante";join(room)}else if(name)$("name").value=name;
+</script></body></html>
