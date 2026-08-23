@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conecta — vídeo e tela</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#080b14;color:#f5f7ff;font-family:Inter,system-ui,sans-serif}
+header{height:68px;border-bottom:1px solid #252d42;padding:0 22px;display:flex;align-items:center;justify-content:space-between}.logo{font-size:23px;font-weight:900}.logo b{color:#7481ff}
+main{max-width:1180px;margin:auto;padding:28px 18px}.hero{text-align:center;padding:55px 10px 35px}.hero h1{font-size:clamp(34px,6vw,62px);margin:0 0 12px}.muted{color:#9ba7c0;line-height:1.55}
+.card{background:#111725;border:1px solid #29334b;border-radius:20px;padding:24px}.center{text-align:center}.row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}input{background:#0b101c;border:1px solid #303b55;color:white;border-radius:12px;padding:13px 15px;min-width:280px}button{border:0;border-radius:12px;padding:13px 17px;background:#6876ff;color:white;font-weight:800;cursor:pointer}button.alt{background:#202a43}button.red{background:#c84359}
+#app{display:none}.bar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:15px}.link{display:flex;gap:8px}.link input{min-width:320px}.videos{display:grid;grid-template-columns:1fr 1fr;gap:14px}.tile{height:min(60vh,540px);background:#05070c;border-radius:17px;overflow:hidden;position:relative;border:1px solid #29334b}.tile video{width:100%;height:100%;object-fit:contain}.tag{position:absolute;z-index:2;left:12px;top:12px;background:#000a;padding:7px 10px;border-radius:8px;font-size:12px}.controls{display:flex;gap:9px;justify-content:center;flex-wrap:wrap;margin-top:15px}.chat{margin-top:15px}.messages{height:170px;overflow:auto;background:#0a0f1b;border-radius:13px;padding:12px;border:1px solid #29334b}.msg{margin:6px 0}.msg b{color:#8491ff}.send{display:flex;gap:8px;margin-top:8px}.send input{flex:1;min-width:0}.status{color:#9ba7c0;font-size:13px}
+@media(max-width:800px){.videos{grid-template-columns:1fr}.tile{height:38vh}.link{width:100%}.link input{min-width:0;flex:1}}
+</style></head>
+<body>
+<header><div class="logo">Conecta<b>.</b></div><div class="status" id="status">Pronto</div></header>
+<main>
+<section id="home"><div class="hero"><h1>Converse. Compartilhe. Conecte.</h1><p class="muted">Câmera, microfone, tela e chat em uma sala privada.</p></div>
+<div class="card center"><div class="row"><input id="name" maxlength="30" placeholder="Seu nome ou apelido"><button id="start">Criar / entrar na sala</button></div><p class="muted">Abra um link de sala em dois dispositivos para testar.</p></div></section>
+<section id="app"><div class="card">
+<div class="bar"><div><b id="roomName"></b><div class="status" id="people">Conectando...</div></div><div class="link"><input id="share" readonly><button id="copy">Copiar</button></div></div>
+<div class="videos"><div class="tile"><span class="tag">Você</span><video id="local" autoplay muted playsinline></video></div><div class="tile"><span class="tag" id="remoteName">Aguardando...</span><video id="remote" autoplay playsinline></video></div></div>
+<div class="controls"><button id="cam">📹 Câmera</button><button id="mic">🎤 Microfone</button><button id="screen">🖥️ Tela</button><button class="red" id="leave">☎ Encerrar</button></div>
+<div class="chat"><div class="messages" id="messages"></div><div class="send"><input id="text" placeholder="Mensagem..."><button id="send">Enviar</button></div></div>
+</div></section></main>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.0/dist/livekit-client.umd.min.js"></script>
+<script>
+const {Room,RoomEvent,Track}=LivekitClient;
+const $=id=>document.getElementById(id);
+const params=new URLSearchParams(location.search);
+let roomId=params.get("room"),name=localStorage.getItem("conectaName")||"Visitante",room=null;
+$("name").value=name;
+function msg(t){$("status").textContent=t}
+function attach(track,el){track.attach(el)}
+function addChat(from,text){let d=document.createElement("div");d.className="msg";d.innerHTML="<b>"+esc(from)+":</b> "+esc(text);$("messages").appendChild(d);$("messages").scrollTop=99999}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+async function join(id){
+ roomId=id; $("home").style.display="none";$("app").style.display="block";$("roomName").textContent="Sala "+id;
+ $("share").value=location.origin+location.pathname+"?room="+encodeURIComponent(id);
+ history.replaceState({}, "", "?room="+encodeURIComponent(id));
+ const identity=(name||"Visitante")+"-"+Math.random().toString(36).slice(2,7);
+ const r=await fetch("/api/token",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({room:id,identity})});
+ const data=await r.json(); if(!r.ok) throw Error(data.error);
+ room=new Room({adaptiveStream:true,dynacast:true});
+ room.on(RoomEvent.TrackSubscribed,(track,pub,participant)=>{
+   if(track.kind===Track.Kind.Video){
+     const isScreen=pub.source===Track.Source.ScreenShare;
+     if(isScreen){track.attach($("remote"))}else{track.attach($("remote"))}
+     $("remoteName").textContent=participant.name||participant.identity;
+   } else if(track.kind===Track.Kind.Audio) track.attach();
+ });
+ room.on(RoomEvent.TrackUnsubscribed,(track)=>track.detach());
+ room.on(RoomEvent.ParticipantConnected,p=>{$("people").textContent="2 pessoas";$("remoteName").textContent=p.name||p.identity});
+ room.on(RoomEvent.ParticipantDisconnected,()=>{$("people").textContent="Aguardando alguém...";$("remote").srcObject=null;$("remoteName").textContent="Aguardando..."});
+ room.on(RoomEvent.DataReceived,(payload,participant)=>{try{const m=JSON.parse(new TextDecoder().decode(payload));if(m.type==="chat")addChat(participant?.name||"Visitante",m.text)}catch{}});
+ room.on(RoomEvent.Connected,()=>{$("people").textContent="Conectado";msg("Conectado")});
+ await room.connect(data.url,data.token);
+ await room.localParticipant.setCameraEnabled(true);
+ await room.localParticipant.setMicrophoneEnabled(true);
+ const pub=room.localParticipant.getTrackPublication(Track.Source.Camera);
+ if(pub?.videoTrack)pub.videoTrack.attach($("local"));
+}
+$("start").onclick=async()=>{name=$("name").value.trim()||"Visitante";localStorage.setItem("conectaName",name);let id=roomId;if(!id){id=Math.random().toString(36).slice(2,10)}try{await join(id)}catch(e){alert(e.message)}};
+$("copy").onclick=()=>navigator.clipboard.writeText($("share").value);
+$("cam").onclick=async()=>{if(room)await room.localParticipant.setCameraEnabled(!room.localParticipant.isCameraEnabled)};
+$("mic").onclick=async()=>{if(room)await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled)};
+$("screen").onclick=async()=>{if(room)await room.localParticipant.setScreenShareEnabled(!room.localParticipant.isScreenShareEnabled)};
+$("send").onclick=sendChat;$("text").onkeydown=e=>{if(e.key==="Enter")sendChat()};
+async function sendChat(){let t=$("text").value.trim();if(!t||!room)return;addChat(name,t);await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({type:"chat",text:t})),{reliable:true});$("text").value=""}
+$("leave").onclick=async()=>{await room?.disconnect();location.href=location.pathname};
+if(roomId)join(roomId).catch(e=>alert(e.message));
+</script></body></html>
